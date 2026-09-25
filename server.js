@@ -46,14 +46,28 @@ const skillPool = [
   { id: 'magnet', name: 'แม่เหล็กดูดของ', icon: '🧲', apply: p => { p.magnetRadius += 100; } }
 ];
 
-function makePlayer(id, name) {
-  return {
-    id, name, x: WORLD_W / 2 + Math.random() * 100 - 50, y: WORLD_H / 2 + Math.random() * 100 - 50,
+function makePlayer(id, name, charType) {
+  let p = {
+    id, name, charType: charType || 'knight',
+    x: WORLD_W / 2 + Math.random() * 100 - 50, y: WORLD_H / 2 + Math.random() * 100 - 50,
     r: 14, hp: 100, maxHp: 100, speed: 180, dmg: 10, fireRate: 0.5, lastShot: 0,
     level: 1, xp: 0, xpNext: 20, range: 380, projectileCount: 1, pierce: 0,
     orbitCount: 0, orbitDamage: 8, orbitRadius: 70, orbitAngle: 0, magnetRadius: 120,
-    inputDx: 0, inputDy: 0, alive: true, pendingLevelUps: 0
+    inputDx: 0, inputDy: 0, alive: true, pendingLevelUps: 0, healTimer: 0, xpBonus: 1
   };
+
+  if (p.charType === 'knight') { p.maxHp = 150; p.hp = 150; }
+  else if (p.charType === 'archer') { p.fireRate = 0.35; p.range = 460; }
+  else if (p.charType === 'mage') { p.dmg = 16; }
+  else if (p.charType === 'assassin') { p.speed = 230; p.pierce = 2; }
+  else if (p.charType === 'priest') { p.hasRegen = true; }
+  else if (p.charType === 'hunter') { p.magnetRadius = 250; p.xpBonus = 1.2; }
+  else if (p.charType === 'vampire') { p.isVampire = true; }
+  else if (p.charType === 'skeleton') { p.dmg = 25; p.maxHp = 70; p.hp = 70; }
+  else if (p.charType === 'angel') { p.orbitCount = 2; p.orbitDamage = 12; }
+  else if (p.charType === 'demon') { p.dmg = 20; p.speed = 220; p.fireRate = 0.3; }
+
+  return p;
 }
 
 function broadcast(obj) {
@@ -124,7 +138,8 @@ wss.on('connection', (ws) => {
     if (m.t === 'join') {
       myId = 'p' + Math.random().toString(36).slice(2, 9);
       const name = (m.d && m.d.name ? m.d.name : 'Player').slice(0, 16);
-      players[myId] = makePlayer(myId, name);
+      const charType = m.d && m.d.char ? m.d.char : 'knight';
+      players[myId] = makePlayer(myId, name, charType);
       sockets[myId] = ws;
       sendTo(myId, { t: 'joined', d: { id: myId, world: { w: WORLD_W, h: WORLD_H } } });
     } else if (m.t === 'input' && myId && players[myId]) {
@@ -156,6 +171,15 @@ setInterval(() => {
   for (const id in players) {
     const p = players[id];
     if (!p.alive) continue;
+
+    if (p.hasRegen) {
+      p.healTimer += DT;
+      if (p.healTimer >= 1) {
+        p.hp = Math.min(p.maxHp, p.hp + 2);
+        p.healTimer = 0;
+      }
+    }
+
     const len = Math.hypot(p.inputDx, p.inputDy) || 1;
     if (p.inputDx !== 0 || p.inputDy !== 0) {
       p.x += (p.inputDx / len) * p.speed * DT;
@@ -202,10 +226,13 @@ setInterval(() => {
       if (b.hitList.includes(e.id)) continue;
       if (Math.hypot(b.x - e.x, b.y - e.y) < b.r + e.r) {
         e.hp -= b.dmg; b.hitList.push(e.id);
+        const owner = players[b.owner];
+        if (owner && owner.isVampire) {
+          owner.hp = Math.min(owner.maxHp, owner.hp + 1);
+        }
         if (e.hp <= 0) {
           killEnemy(e);
-          const owner = players[b.owner];
-          if (owner) { owner.xp += e.xp; checkLevelUp(owner); }
+          if (owner) { owner.xp += Math.round(e.xp * owner.xpBonus); checkLevelUp(owner); }
           enemies.splice(j, 1);
         }
         if (b.pierceLeft <= 0) bullets.splice(i, 1); else b.pierceLeft--;
@@ -255,7 +282,7 @@ setInterval(() => {
       }
       if (d < p.r + 6) {
         if (o.heal) p.hp = Math.min(p.maxHp, p.hp + o.value);
-        else { p.xp += o.value; checkLevelUp(p); }
+        else { p.xp += Math.round(o.value * p.xpBonus); checkLevelUp(p); }
         taken = true; break;
       }
     }
@@ -274,7 +301,7 @@ setInterval(() => {
     t: 'state',
     d: {
       elapsed: Math.floor(elapsed), kills: killCount,
-      players: Object.values(players).map(p => ({ id: p.id, name: p.name, x: p.x, y: p.y, hp: p.hp, maxHp: p.maxHp, level: p.level, xp: p.xp, xpNext: p.xpNext, orbitCount: p.orbitCount, orbitAngle: p.orbitAngle, orbitRadius: p.orbitRadius, alive: p.alive, dmg: p.dmg, projectileCount: p.projectileCount, pierce: p.pierce })),
+      players: Object.values(players).map(p => ({ id: p.id, name: p.name, x: p.x, y: p.y, hp: p.hp, maxHp: p.maxHp, level: p.level, xp: p.xp, xpNext: p.xpNext, orbitCount: p.orbitCount, orbitAngle: p.orbitAngle, orbitRadius: p.orbitRadius, alive: p.alive })),
       enemies: enemies.map(e => ({ id: e.id, type: e.type, x: e.x, y: e.y, r: e.r, hp: e.hp, maxHp: e.maxHp, color: e.color })),
       bullets: bullets.map(b => ({ x: b.x, y: b.y, r: b.r })),
       enemyBullets: enemyBullets.map(b => ({ x: b.x, y: b.y, r: b.r })),
