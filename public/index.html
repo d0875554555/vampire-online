@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>Vampire Night Survivor - Online</title>
+<style>
+*{touch-action:none}
+body{margin:0;overflow:hidden;background:#000;font-family:Tahoma,sans-serif}
+canvas{display:block;background:#1a1a2e}
+#ui{position:fixed;top:10px;left:10px;color:#fff;font-size:14px;z-index:5}
+#hpBar{width:200px;height:16px;background:#330000;border:2px solid #fff;border-radius:4px;overflow:hidden}
+#hpFill{height:100%;background:#e63946;width:100%}
+#xpBar{width:200px;height:8px;background:#222;border:1px solid #fff;margin-top:4px;overflow:hidden}
+#xpFill{height:100%;background:#4cc9f0;width:0%}
+#playerList{position:fixed;top:10px;right:180px;color:#fff;font-size:11px;background:rgba(0,0,0,0.5);padding:6px 10px;border-radius:6px;z-index:5}
+#gameOver{position:fixed;inset:0;display:none;align-items:center;justify-content:center;flex-direction:column;background:rgba(0,0,0,0.85);color:#fff;z-index:10}
+#gameOver h1{color:#e63946;font-size:40px}
+#restartBtn{margin-top:20px;padding:10px 30px;font-size:16px;background:#e63946;border:0;border-radius:6px;color:#fff;cursor:pointer}
+#startScreen{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;flex-direction:column;background:rgba(0,0,0,0.9);color:#fff;z-index:11;text-align:center;padding:20px}
+#startScreen h1{color:#e63946;font-size:36px;letter-spacing:2px}
+#nameInput{padding:10px 14px;font-size:15px;border-radius:6px;border:1px solid #47597d;margin-top:14px;width:220px;text-align:center}
+#startBtn{margin-top:14px;padding:12px 40px;font-size:18px;background:#e63946;border:0;border-radius:6px;color:#fff;cursor:pointer}
+#connStatus{margin-top:10px;font-size:12px;color:#8fa4c8}
+#levelUpScreen{position:fixed;inset:0;display:none;align-items:center;justify-content:center;flex-direction:column;background:rgba(0,0,0,0.75);z-index:9}
+#levelUpScreen h2{color:#ffd700;font-size:28px;margin-bottom:20px;text-shadow:2px 2px #000}
+#cards{display:flex;gap:16px;flex-wrap:wrap;justify-content:center;max-width:90%}
+.card{width:160px;background:linear-gradient(#2a2a45,#1a1a2e);border:2px solid #4cc9f0;border-radius:10px;padding:14px;color:#fff;cursor:pointer;text-align:center;transition:transform .15s,border-color .15s}
+.card:hover{transform:translateY(-6px) scale(1.04);border-color:#ffd700}
+.card .icon{font-size:30px}
+.card .name{font-size:13px;font-weight:bold;margin-top:8px;color:#ffd700}
+#bossAlert{position:fixed;top:20%;left:50%;transform:translate(-50%,-50%);color:#ff006e;font-size:28px;font-weight:bold;text-shadow:2px 2px #000;opacity:0;pointer-events:none;z-index:6;transition:opacity .3s;text-align:center}
+#joyZone{position:fixed;bottom:0;left:0;width:50%;height:100%;z-index:8;display:none}
+#joyBase{position:fixed;width:110px;height:110px;border-radius:50%;background:rgba(255,255,255,0.12);border:2px solid rgba(255,255,255,0.4);display:none;z-index:8}
+#joyThumb{position:fixed;width:50px;height:50px;border-radius:50%;background:rgba(255,255,255,0.55);border:2px solid #fff;display:none;z-index:8;margin-left:-25px;margin-top:-25px}
+body.mobile #joyZone{display:block}
+</style>
+</head>
+<body>
+<canvas id="cv"></canvas>
+<div id="ui">
+  <div>Level: <span id="lvl">1</span> | Time: <span id="timer">0</span>s | Kills: <span id="kills">0</span></div>
+  <div id="hpBar"><div id="hpFill"></div></div>
+  <div id="xpBar"><div id="xpFill"></div></div>
+</div>
+<div id="playerList"></div>
+<div id="bossAlert">⚠️ BOSS กำลังมา!</div>
+<div id="startScreen">
+  <h1>VAMPIRE NIGHT SURVIVOR</h1>
+  <p>เล่นออนไลน์กับเพื่อนในแมพเดียวกัน</p>
+  <input id="nameInput" maxlength="16" placeholder="ใส่ชื่อของคุณ">
+  <button id="startBtn">เข้าเกม</button>
+  <div id="connStatus">กำลังเชื่อมต่อเซิร์ฟเวอร์...</div>
+</div>
+<div id="levelUpScreen">
+  <h2>⭐ เลือกสกิล ⭐</h2>
+  <div id="cards"></div>
+</div>
+<div id="gameOver">
+  <h1>GAME OVER</h1>
+  <p id="survivedTime">รอดชีวิต 0 วินาที</p>
+  <button id="restartBtn">เล่นใหม่</button>
+</div>
+<div id="joyZone"></div>
+<div id="joyBase"></div>
+<div id="joyThumb"></div>
+
+<script>
+const cv=document.getElementById('cv'), cx=cv.getContext('2d');
+function resize(){cv.width=innerWidth;cv.height=innerHeight;}
+window.onresize=resize;resize();
+
+const isMobile=('ontouchstart' in window)||navigator.maxTouchPoints>0;
+if(isMobile) document.body.classList.add('mobile');
+
+let joy={active:false,baseX:0,baseY:0,dx:0,dy:0};
+const joyZone=document.getElementById('joyZone'),joyBase=document.getElementById('joyBase'),joyThumb=document.getElementById('joyThumb');
+const JOY_MAX=55;
+function joyStart(x,y){joy.active=true;joy.baseX=x;joy.baseY=y;joyBase.style.left=(x-55)+'px';joyBase.style.top=(y-55)+'px';joyBase.style.display='block';joyThumb.style.left=x+'px';joyThumb.style.top=y+'px';joyThumb.style.display='block';}
+function joyMove(x,y){if(!joy.active)return;let dx=x-joy.baseX,dy=y-joy.baseY;const dist=Math.hypot(dx,dy);if(dist>JOY_MAX){dx=dx/dist*JOY_MAX;dy=dy/dist*JOY_MAX;}joyThumb.style.left=(joy.baseX+dx)+'px';joyThumb.style.top=(joy.baseY+dy)+'px';joy.dx=dx/JOY_MAX;joy.dy=dy/JOY_MAX;}
+function joyEnd(){joy.active=false;joy.dx=0;joy.dy=0;joyBase.style.display='none';joyThumb.style.display='none';}
+joyZone.addEventListener('touchstart',e=>{const t=e.changedTouches[0];joyStart(t.clientX,t.clientY);});
+joyZone.addEventListener('touchmove',e=>{const t=e.changedTouches[0];joyMove(t.clientX,t.clientY);e.preventDefault();},{passive:false});
+joyZone.addEventListener('touchend',joyEnd);
+joyZone.addEventListener('touchcancel',joyEnd);
+
+let keys={};
+window.onkeydown=e=>keys[e.key.toLowerCase()]=true;
+window.onkeyup=e=>keys[e.key.toLowerCase()]=false;
+
+let ws=null, myId=null, world={w:8000,h:8000};
+let latest={players:[],enemies:[],bullets:[],enemyBullets:[],orbs:[],elapsed:0,kills:0};
+let cam={x:0,y:0};
+let running=false;
+
+function connect(){
+  const proto=location.protocol==='https:'?'wss':'ws';
+  ws=new WebSocket(proto+'://'+location.host);
+  ws.onopen=()=>{document.getElementById('connStatus').textContent='เชื่อมต่อสำเร็จ พร้อมเล่นแล้ว!';};
+  ws.onclose=()=>{document.getElementById('connStatus').textContent='การเชื่อมต่อขาดหาย กำลังลองใหม่...';setTimeout(connect,2000);};
+  ws.onmessage=ev=>{
+    const m=JSON.parse(ev.data);
+    if(m.t==='joined'){myId=m.d.id;world=m.d.world;running=true;document.getElementById('startScreen').style.display='none';}
+    else if(m.t==='state'){latest=m.d;}
+    else if(m.t==='bossAlert'){const el=document.getElementById('bossAlert');el.style.opacity=1;setTimeout(()=>el.style.opacity=0,2500);}
+    else if(m.t==='levelup'){showLevelUp(m.d.options);}
+    else if(m.t==='dead'){
+      running=false;
+      document.getElementById('survivedTime').textContent='รอดชีวิต '+m.d.elapsed+' วินาที | เลเวล '+m.d.level+' | ฆ่ารวม '+m.d.kills+' ตัว';
+      document.getElementById('gameOver').style.display='flex';
+    }
+  };
+}
+connect();
+
+document.getElementById('startBtn').onclick=()=>{
+  const name=document.getElementById('nameInput').value.trim()||'Player';
+  if(ws && ws.readyState===1){ ws.send(JSON.stringify({t:'join',d:{name}})); }
+};
+document.getElementById('restartBtn').onclick=()=>{ location.reload(); };
+
+function showLevelUp(options){
+  running=false;
+  const cardsDiv=document.getElementById('cards');
+  cardsDiv.innerHTML='';
+  options.forEach(opt=>{
+    const card=document.createElement('div');
+    card.className='card';
+    card.innerHTML=`<div class="icon">${opt.icon}</div><div class="name">${opt.name}</div>`;
+    card.onclick=()=>{
+      ws.send(JSON.stringify({t:'skillPick',d:{id:opt.id}}));
+      document.getElementById('levelUpScreen').style.display='none';
+      running=true;
+    };
+    cardsDiv.appendChild(card);
+  });
+  document.getElementById('levelUpScreen').style.display='flex';
+}
+
+let lastInputSend=0;
+function sendInput(){
+  let dx=0,dy=0;
+  if(keys['w']||keys['arrowup'])dy-=1;
+  if(keys['s']||keys['arrowdown'])dy+=1;
+  if(keys['a']||keys['arrowleft'])dx-=1;
+  if(keys['d']||keys['arrowright'])dx+=1;
+  if(joy.active){dx+=joy.dx;dy+=joy.dy;}
+  if(ws && ws.readyState===1){ ws.send(JSON.stringify({t:'input',d:{dx,dy}})); }
+}
+setInterval(()=>{ if(running && myId) sendInput(); },50);
+
+function loop(){
+  draw();
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+
+function draw(){
+  cx.fillStyle='#16162a';
+  cx.fillRect(0,0,cv.width,cv.height);
+  if(!myId)return;
+
+  const me=latest.players.find(p=>p.id===myId);
+  if(!me)return;
+
+  cam.x=Math.max(0,Math.min(world.w-cv.width,me.x-cv.width/2));
+  cam.y=Math.max(0,Math.min(world.h-cv.height,me.y-cv.height/2));
+
+  cx.strokeStyle='rgba(255,255,255,0.06)';
+  const gridSize=50;
+  const startX=Math.floor(cam.x/gridSize)*gridSize, startY=Math.floor(cam.y/gridSize)*gridSize;
+  for(let x=startX;x<cam.x+cv.width+gridSize;x+=gridSize){const sx=x-cam.x;cx.beginPath();cx.moveTo(sx,0);cx.lineTo(sx,cv.height);cx.stroke();}
+  for(let y=startY;y<cam.y+cv.height+gridSize;y+=gridSize){const sy=y-cam.y;cx.beginPath();cx.moveTo(0,sy);cx.lineTo(cv.width,sy);cx.stroke();}
+
+  cx.strokeStyle='#e63946';cx.lineWidth=6;
+  cx.strokeRect(0-cam.x,0-cam.y,world.w,world.h);
+
+  for(const o of latest.orbs){cx.fillStyle=o.heal?'#ff4d6d':'#4cc9f0';cx.beginPath();cx.arc(o.x-cam.x,o.y-cam.y,6,0,7);cx.fill();}
+  cx.fillStyle='#ffd700';
+  for(const b of latest.bullets){cx.beginPath();cx.arc(b.x-cam.x,b.y-cam.y,b.r,0,7);cx.fill();}
+  cx.fillStyle='#ff006e';
+  for(const b of latest.enemyBullets){cx.beginPath();cx.arc(b.x-cam.x,b.y-cam.y,b.r,0,7);cx.fill();}
+
+  for(const p of latest.players){
+    if(p.orbitCount>0){
+      cx.fillStyle='#a3ffd6';
+      for(let i=0;i<p.orbitCount;i++){
+        const ang=p.orbitAngle+i*(Math.PI*2/p.orbitCount);
+        const bx=p.x+Math.cos(ang)*p.orbitRadius-cam.x, by=p.y+Math.sin(ang)*p.orbitRadius-cam.y;
+        cx.beginPath();cx.arc(bx,by,8,0,7);cx.fill();
+      }
+    }
+  }
+
+  for(const e of latest.enemies){
+    cx.fillStyle=e.color;
+    cx.beginPath();cx.arc(e.x-cam.x,e.y-cam.y,e.r,0,7);cx.fill();
+    cx.fillStyle='#000';
+    cx.fillRect(e.x-e.r-cam.x,e.y-e.r-8-cam.y,e.r*2*(e.hp/e.maxHp),3);
+  }
+
+  for(const p of latest.players){
+    if(!p.alive)continue;
+    cx.fillStyle=p.id===myId?'#06d6a0':'#4cc9f0';
+    cx.beginPath();cx.arc(p.x-cam.x,p.y-cam.y,14,0,7);cx.fill();
+    cx.strokeStyle='#fff';cx.lineWidth=2;cx.stroke();
+    cx.fillStyle='#fff';cx.font='11px Tahoma';cx.textAlign='center';
+    cx.fillText(p.name+' Lv.'+p.level,p.x-cam.x,p.y-cam.y-22);
+  }
+
+  document.getElementById('lvl').textContent=me.level;
+  document.getElementById('timer').textContent=latest.elapsed;
+  document.getElementById('kills').textContent=latest.kills;
+  document.getElementById('hpFill').style.width=Math.max(0,me.hp/me.maxHp*100)+'%';
+  document.getElementById('xpFill').style.width=Math.min(100,me.xp/me.xpNext*100)+'%';
+  document.getElementById('playerList').innerHTML='ผู้เล่นออนไลน์: '+latest.players.length+'<br>'+latest.players.map(p=>p.name+' (Lv.'+p.level+')').join('<br>');
+
+  drawMinimap(me);
+}
+
+function drawMinimap(me){
+  const mmW=160,mmH=160,pad=10;
+  const mx=cv.width-mmW-pad, my=pad;
+  cx.fillStyle='rgba(0,0,0,0.55)';
+  cx.fillRect(mx,my,mmW,mmH);
+  cx.strokeStyle='#4cc9f0';cx.lineWidth=1;cx.strokeRect(mx,my,mmW,mmH);
+  const sx=mmW/world.w, sy=mmH/world.h;
+  for(const e of latest.enemies){
+    cx.fillStyle=e.type==='boss'?'#ff006e':'#e63946';
+    const r=e.type==='boss'?4:2;
+    cx.fillRect(mx+e.x*sx-r/2,my+e.y*sy-r/2,r,r);
+  }
+  for(const p of latest.players){
+    cx.fillStyle=p.id===me.id?'#06d6a0':'#4cc9f0';
+    cx.beginPath();cx.arc(mx+p.x*sx,my+p.y*sy,3,0,7);cx.fill();
+  }
+}
+</script>
+</body>
+</html>
